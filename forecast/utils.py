@@ -282,7 +282,7 @@ def subir_pandas_dataframe_a_hive(df_, nombre_tabla, path_tabla_hive, cols_varch
     
     df.to_csv("to_hive.csv",index=False,sep=";")
     sesion = boto3.session.Session()
-    client = sesion.client('s3',aws_access_key_id = 'AKIAZE4F2HCI3ZB7ADET',  aws_secret_access_key = "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" )
+    client = sesion.client('s3',aws_access_key_id = "",  aws_secret_access_key = "" )
     client.upload_file("to_hive.csv", "melilake.sandbox",path_tabla_hive+"/to_hive.csv")
     
     hive.execute(query_crear_tabla)
