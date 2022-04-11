@@ -1,0 +1,26 @@
+# The package melitk.fda is already installed (by default)
+--index-url http://pypi.artifacts.furycloud.io/simple/ --trusted-host pypi.artifacts.furycloud.io
+
+melitk.analytics
+melitk.melipass
+melitk.fda==1.*
+scikit-learn==1.0.2
+pandas==1.3.4
+matplotlib==3.5.0
+lifetimes==0.11.3
+scipy>=1.3
+toolz==0.11.2
+cloudpickle
+tqdm==4.62.3
+partd==1.2.0
+catboost==1.0.3
+mktutils==0.4.7
+pyarrow==6.0.1
+s3fs==0.4.0
+google-cloud-bigquery==1.28
+sasl==0.2.1
+google-cloud-storage==1.38.0
+gcsfs==2021.10.0
+bayesian-optimization==1.2.0
+seaborn==0.11.2
+evidently

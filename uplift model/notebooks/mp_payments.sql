@@ -1,0 +1,12 @@
+SELECT  A.CUS_CUST_ID_BUY AS CUS_CUST_ID,
+        A.PAY_MOVE_DATE,
+        A.TPV_SEGMENT_DETAIL,
+        A.PAY_PAYMENT_ID,
+        A.pay_total_paid_amt as PAY_COUPON_AMOUNT_AMT,
+        A.pay_payment_method as PAY_PM_ID
+FROM    MELILAKE.BT_MP_PAY_PAYMENTS A
+WHERE   A.PAY_MOVE_DATE BETWEEN '2018-12-01' AND '2019-03-31'
+        AND A.SIT_SITE_ID = 'MLA'
+        AND A.TPV_FLAG = '1'
+        AND A.TPV_SEGMENT = 'Wallet'
+LIMIT 300000

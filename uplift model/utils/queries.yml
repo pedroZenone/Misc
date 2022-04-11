@@ -1,0 +1,180 @@
+BACKBONE_CREATE:
+    CREATE TABLE IF NOT EXISTS {table_name}_{site} (
+        CUS_CUST_ID INTEGER,
+        SENT_DATE DATE,
+        EVENT_TYPE STRING,
+        CONVERSION NUMERIC
+        )
+
+BACKBONE_TRUNCATE: TRUNCATE TABLE {table_name}_{site}
+
+BACKBONE:
+    INSERT INTO {table_name}_{site}
+    WITH push as ( 
+            SELECT 
+                push.CUS_CUST_ID,
+                push.SIT_SITE_ID, 
+                push.SENT_DATE, 
+                push.EVENT_TYPE 
+            FROM meli-marketing.MKTPUBLIC.V_BT_PUSH_NOTIFICATION_EVENT push 
+            WHERE BATCH_ID LIKE 'MLB_ML_PUSHML_AO_ALL_X_ACT_ALL_NEWBUYERS%' 
+                AND push.EVENT_TYPE in ('sent','control') 
+                AND push.APP = 'mercadolibre'
+                AND push.sit_site_id = '{site}' 
+                AND push.SENT_DATE >= DATE '{date_intial}' AND push.SENT_DATE <= DATE '{date_end}' 
+             ),
+    orders_ as (
+        SELECT 
+            push.CUS_CUST_ID, 
+            push.SENT_DATE, 
+            push.EVENT_TYPE,
+            orders.ORD_CREATED_DT,
+            ROW_NUMBER() OVER (PARTITION BY push.CUS_CUST_ID ORDER BY orders.ORD_CREATED_DT) AS ORDERING_PURCHASE
+        FROM push LEFT JOIN meli-bi-data.WHOWNER.BT_ORD_ORDERS orders
+        ON push.CUS_CUST_ID = orders.ORD_BUYER.ID 
+            AND push.sit_site_id = orders.SIT_SITE_ID 
+            AND ORD_CLOSED_DT is not null
+            AND orders.ord_status = 'paid' 
+            AND orders.ORD_CLOSED_DT BETWEEN push.SENT_DATE AND push.SENT_DATE + 4 
+            AND orders.ORD_CREATED_DT = push.SENT_DATE
+        )
+
+    SELECT 
+        CUS_CUST_ID,
+        SENT_DATE,
+        EVENT_TYPE,
+        CASE WHEN ORD_CREATED_DT is null THEN 0 ELSE 1 END AS CONVERSION
+    FROM orders_
+    WHERE ORDERING_PURCHASE = 1
+
+PUSH_LAST_7_DAYS:
+    SELECT 
+    bk.CUS_CUST_ID, 
+    bk.SENT_DATE,
+    SAFE_DIVIDE(
+        COUNT(DISTINCT CASE WHEN push.SENT_DATE BETWEEN bk.SENT_DATE - 15 AND bk.SENT_DATE - 1 THEN push.SENT_DATE ELSE NULL END),
+        COUNT(DISTINCT CASE WHEN push.SENT_DATE BETWEEN bk.SENT_DATE - 31 AND bk.SENT_DATE - 16 THEN push.SENT_DATE ELSE NULL END)
+    ) AS R_PUSH_LAST_15D_VS_REST_OF_MONTH,
+    COUNT(DISTINCT CASE WHEN push.SENT_DATE BETWEEN bk.SENT_DATE - 7 AND bk.SENT_DATE - 1 THEN push.SENT_DATE ELSE NULL END) TOTAL_PUSH_LAST_7D,
+    DATE_DIFF(
+        bk.SENT_DATE,
+        MAX(
+            CASE WHEN push.SENT_DATE BETWEEN bk.SENT_DATE - 7 AND bk.SENT_DATE - 1 THEN push.SENT_DATE ELSE NULL END),DAY) as RECENCY
+    FROM {backbone}_{site} bk 
+    LEFT JOIN meli-marketing.MKTPUBLIC.V_BT_PUSH_NOTIFICATION_EVENT push 
+        ON bk.CUS_CUST_ID = push.CUS_CUST_ID 
+        AND push.BATCH_ID NOT LIKE 'MLB_ML_PUSHML_AO_ALL_X_ACT_ALL_NEWBUYERS%' 
+        AND push.EVENT_TYPE in ('sent','control') 
+        AND push.APP = 'mercadolibre'
+        AND push.sit_site_id = '{site}' 
+        AND push.SENT_DATE BETWEEN bk.SENT_DATE - 31 AND bk.SENT_DATE - 1
+    GROUP BY 1,2
+
+BEHAVIOUR_VARIABLES:
+    SELECT 
+        bk.CUS_CUST_ID,
+        bk.SENT_DATE, 
+        COUNT(DISTINCT ag.LOG_DATE) AS LOG_DATE_COUNT_7D,
+        IFNULL(AVG(ag.AVG_PRICE_ITEM),0) AS AVG_PRICE_ITEM_7D,
+        DATE_DIFF(bk.SENT_DATE, MAX(ag.LOG_DATE), DAY) as RECENCY,
+        IFNULL(SUM(ag.CAT_CATEG_ID_COUNT),0) AS CAT_CATEG_ID_COUNT_7D,
+        IFNULL(AVG(CASE WHEN ag.LOG_DATE BETWEEN DATE(cus.CUS_RU_SINCE_DT) AND DATE(cus.CUS_RU_SINCE_DT) + 7 THEN ag.AVG_PRICE_ITEM END),0) AS AVG_PRICE_ITEM_F7D,
+        MIN(ag.MIN_PRICE_ITEM) AS MIN_PRICE_ITEM ,
+        MAX(ag.MAX_PRICE_ITEM) AS MAX_PRICE_ITEM,
+        IFNULL(SUM(ag.BUY_INTENTION_ITEM_COUNT),0)  AS BUY_INTENTION_ITEM_COUNT,
+        IFNULL(SUM(CASE WHEN ag.LOG_DATE BETWEEN DATE(cus.CUS_RU_SINCE_DT) AND DATE(cus.CUS_RU_SINCE_DT) + 7 THEN ag.CAT_CATEG_ID_COUNT END),0)  CAT_CATEG_ID_COUNT_F7D,
+        IFNULL(SUM(ag.VIP_VIEW_APP_ANDROID_ITEM_COUNT),0)  AS VIP_VIEW_APP_ANDROID_ITEM_COUNT,
+        IFNULL(SUM(ag.VIP_VIEW_APP_IOS_ITEM_COUNT),0)  AS VIP_VIEW_APP_IOS_ITEM_COUNT,
+        IFNULL(SUM(ag.VIP_VIEW_DESKTOP_ITEM_COUNT),0)  AS VIP_VIEW_DESKTOP_ITEM_COUNT,
+        IFNULL(SUM(ag.VIP_VIEW_WEB_MOBILE_ITEM_COUNT),0)  AS VIP_VIEW_WEB_MOBILE_ITEM_COUNT,
+        IFNULL(SUM(ag.VIP_VIEW_APP_ANDROID_ITEM_COUNT)+SUM(ag.VIP_VIEW_APP_IOS_ITEM_COUNT) + SUM(ag.VIP_VIEW_DESKTOP_ITEM_COUNT) + SUM(ag.VIP_VIEW_WEB_MOBILE_ITEM_COUNT),0) AS VIP_VIEW,
+        IFNULL(SUM(ag.QUESTION_ITEM_COUNT),0)  AS QUESTION_ITEM_COUNT,
+        IFNULL(SUM(ag.CHECKOUT_CONGRATS_ITEM_COUNT),0)  AS CHECKOUT_CONGRATS_ITEM_COUNT,
+        IFNULL(SUM(ag.ADD_TO_CART_ITEM_COUNT),0)  AS ADD_TO_CART_ITEM_COUNT,
+        IFNULL(SUM(ag.BOOKMARK_ITEM_COUNT),0)  AS BOOKMARK_ITEM_COUNT,
+        MIN(inst.OS_NAME) OS_NAME,
+        MAX(CASE WHEN inst.BU = 'ML' THEN 1 ELSE 0 END) AS APP_ML,
+        MAX(CASE WHEN inst.BU = 'MP' THEN 1 ELSE 0 END) AS APP_MP,
+        DATE_DIFF(bk.SENT_DATE,MAX(CASE WHEN inst.BU = 'ML' THEN inst.INSTALL_DT END),DAY)  AS MAX_FROM_INSTALL_ML,
+        DATE_DIFF(bk.SENT_DATE,MIN(CASE WHEN inst.BU = 'ML' THEN inst.INSTALL_DT END) ,DAY) AS MIN_FROM_INSTALL_ML,
+        DATE_DIFF(bk.SENT_DATE,MAX(CASE WHEN inst.BU = 'MP' THEN inst.INSTALL_DT END) ,DAY) AS MAX_FROM_INSTALL_MP,
+        DATE_DIFF(bk.SENT_DATE,MIN(CASE WHEN inst.BU = 'MP' THEN inst.INSTALL_DT END) ,DAY) AS MIN_FROM_INSTALL_MP,
+        IFNULL(SUM(SAFE_CAST(pay.PAY_TRANSACTION_DOL_AMT as NUMERIC)),0) AS TOTAL_PAYMENTS_AMT_SUM,
+        IFNULL(SUM(CASE WHEN pay.TPV_SEGMENT_ID IN ('Wallet') THEN CAST(pay.PAY_TRANSACTION_DOL_AMT AS NUMERIC) END),0) AS WALLET_PAYMENTS_AMT_SUM,
+        IFNULL(SUM(CASE WHEN pay.TPV_SEGMENT_ID IN ('Aggregator') THEN CAST(pay.PAY_TRANSACTION_DOL_AMT AS NUMERIC) END),0) AS AGGREGATOR_PAYMENTS_AMT_SUM,
+        COUNT(distinct pay.PAY_PAYMENT_ID) AS TOTAL_PAYMENTS_COUNT
+    FROM {backbone}_{site} bk 
+    LEFT JOIN meli-marketing.MODELLING.LK_EVENT_CUSTOMER_ITEMS_AGG ag
+        ON bk.CUS_CUST_ID = ag.CUS_CUST_ID
+        AND ag.sit_site_id = '{site}' 
+        AND ag.LOG_DATE BETWEEN bk.SENT_DATE - 7 AND bk.SENT_DATE - 1
+    LEFT JOIN meli-bi-data.WHOWNER.LK_CUS_CUSTOMERS_DATA cus
+        ON bk.CUS_CUST_ID = cus.CUS_CUST_ID
+        AND cus.SIT_SITE_ID_CUS = '{site}' 
+    LEFT JOIN meli-marketing.APPINSTALL.BT_INSTALL_EVENT_CUST inst 
+        ON bk.CUS_CUST_ID = inst.CUS_CUST_ID
+        AND inst.sit_site_id = '{site}' 
+        AND inst.BU in ('MP','ML')
+        AND inst.CUS_CUST_ID is not null
+        AND inst.INSTALL_DT BETWEEN bk.SENT_DATE - 360 AND bk.SENT_DATE - 1
+    LEFT JOIN meli-bi-data.WHOWNER.BT_MP_PAY_PAYMENTS pay
+        ON bk.CUS_CUST_ID = pay.CUS_CUST_ID_BUY
+        AND TRIM(pay.SIT_SITE_ID) = '{site}' 
+        AND pay.PAY_MOVE_DATE BETWEEN bk.SENT_DATE - 90 AND bk.SENT_DATE - 1
+        AND pay.PAY_APPROVED_DT is not null
+        AND pay.TPV_SEGMENT_ID IN ('Account Fund','Wallet','Point','Aggregator','Point Device Sale')
+    GROUP BY 1,2
+    
+NB_CONSUMTION:
+    SELECT 
+        pay.SIT_SITE_ID,
+        pay.pay_created_dt, 
+        SUM(mkt_cpn_amount) as AMOUNT
+    FROM  `meli-bi-data.WHOWNER.BT_PAY_PAYMENTS` as pay
+    INNER JOIN `meli-bi-data.WHOWNER.BT_MKT_COUPON_V2` as cpn
+        ON pay.pay_payment_id = cpn.pay_payment_id
+        AND pay.cus_cust_id_buy = cpn.cus_cust_id_buy
+    INNER JOIN meli-marketing.PUSH.LK_PUSH_BUDGET_COUPON tool
+        ON tool.sit_site_id = '{site}'
+        AND tool.tim_month >= DATE '{bop}'- 90
+        AND CAST(tool.mkt_tool_id as int64) = cpn.mkt_cpn_campaign_id
+        AND tool.SIT_SITE_ID = pay.SIT_SITE_ID
+    WHERE pay.pay_status_code = 'approved'
+    AND pay.pay_created_dt BETWEEN DATE '{bop}' and DATE'{eop}'
+    GROUP BY 1,2
+    ORDER BY pay.pay_created_dt
+
+HOW_MANNY_PUSH:
+    SELECT
+        NOTIFICATION_DATE as sent_date,
+        CUS_SENT as sent
+    FROM meli-marketing.PUSH.V_BT_PUSH_ML_BATCH_COUPON_CAMPAIGN_EVENT
+    WHERE  1 = 1 
+        AND BATCH_CAMPAIGN_ID LIKE '%NEWBUYERS%'
+        AND SIT_SITE_ID = '{site}'
+        AND NOTIFICATION_DATE BETWEEN DATE '{bop}'AND DATE '{eop}'
+    ORDER BY 1
+CUPON_VARIATION:
+   WITH BASE as (
+   SELECT *,
+       FIRST_VALUE(mkt_cpn_amount) OVER (PARTITION BY pay_created_dt ORDER BY n_tx DESC) AS most_used
+    FROM (
+        SELECT 
+            pay.pay_created_dt,
+            mkt_cpn_amount,
+            COUNT(DISTINCT pay.pay_payment_id) n_tx
+        FROM  `meli-bi-data.WHOWNER.BT_PAY_PAYMENTS` as pay
+        INNER JOIN `meli-bi-data.WHOWNER.BT_MKT_COUPON_V2` as cpn
+            ON pay.pay_payment_id = cpn.pay_payment_id
+            AND pay.cus_cust_id_buy = cpn.cus_cust_id_buy
+        INNER JOIN meli-marketing.PUSH.LK_PUSH_BUDGET_COUPON tool
+            ON tool.sit_site_id = '{site}'
+            AND tool.tim_month >= DATE '{bop}'- 90
+            AND CAST(tool.mkt_tool_id as int64) = cpn.mkt_cpn_campaign_id
+            AND tool.SIT_SITE_ID = pay.SIT_SITE_ID
+        WHERE pay.pay_status_code = 'approved'
+        AND pay.pay_created_dt BETWEEN DATE '{bop}' and DATE'{eop}'
+        GROUP BY 1,2
+        )
+    )
+    SELECT * FROM BASE WHERE mkt_cpn_amount = most_used ORDER BY pay_created_dt
