@@ -257,10 +257,10 @@ class Drift(object):
 
 def send_mail(subject,body,mail,mode="mail"):
     if mode=="mail":
-        data = {"from": "luciano.montanaro@mercadolibre.com",
+        data = {"from": "xx",
                    "to": mail,
                    "subject": subject,
                    "body": body
                   }
-        url = "http://internal.mercadolibre.com/bi/send_mail"
+        url = "http://xx.xx.com/bi/send_mail"
         r = requests.post(url = url, json = data) 
